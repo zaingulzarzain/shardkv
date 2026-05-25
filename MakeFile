@@ -1,0 +1,44 @@
+# Compiler and flags
+CXX = g++
+CXXFLAGS = -Wall -Wextra
+LDFLAGS = -lws2_32
+
+# Targets
+TARGETS = shard_new.exe coordinator_new.exe client_new.exe
+
+# Object files
+HASH_RING_OBJ = hash_ring.o
+
+all: $(TARGETS)
+
+# Hash ring object
+hash_ring.o: common/hash_ring.cpp common/hash_ring.h
+	$(CXX) -c common/hash_ring.cpp -o hash_ring.o
+
+# Shard server
+shard_new.exe: shard/shard_server.cpp
+	$(CXX) -o shard_new.exe shard/shard_server.cpp $(LDFLAGS)
+
+# Coordinator
+coordinator_new.exe: coordinator/coordinator.cpp $(HASH_RING_OBJ)
+	$(CXX) -o coordinator_new.exe coordinator/coordinator.cpp $(HASH_RING_OBJ) $(LDFLAGS)
+
+# Client
+client_new.exe: client/client.cpp
+	$(CXX) -o client_new.exe client/client.cpp $(LDFLAGS)
+
+# Clean
+clean:
+	del /Q *.exe *.o 2>nul || true
+
+# Run all (for testing)
+run: all
+	start cmd /c "shard_new.exe shard1 7001"
+	start cmd /c "shard_new.exe shard2 7002"
+	start cmd /c "shard_new.exe shard3 7003"
+	timeout /t 2
+	start cmd /c "coordinator_new.exe"
+	timeout /t 2
+	start cmd /c "client_new.exe"
+
+.PHONY: all clean run
