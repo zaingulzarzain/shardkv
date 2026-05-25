@@ -1,0 +1,123 @@
+Chaos Test Results - Sharded KV Store
+Date: May 25, 2026
+Group: [Your Group Number]
+
+===================================================================
+TEST 1: Shard crash during PREPARE
+===================================================================
+Procedure: 
+- Started all 3 shards and coordinator
+- Client: BEGIN -> PUT alice 500 -> PUT aa 500 -> COMMIT
+- During 5-second delay before PREPARE to shard2, killed shard2 (Ctrl+C)
+
+Result:
+- Coordinator output: "shard2 -> ERROR|Connection failed"
+- Coordinator decision: ABORT
+- ABORT sent to shard3
+
+Outcome: Transaction aborted successfully. No partial updates.
+
+===================================================================
+TEST 2: Coordinator crash before COMMIT
+===================================================================
+Procedure:
+- All shards running
+- Client: BEGIN -> PUT alice 777 -> PUT aa 666 -> COMMIT
+- After PREPAREs completed, during 3-second delay before COMMIT
+- Killed coordinator (Ctrl+C)
+
+Result:
+- Coordinator process terminated
+- Shards in "in-doubt" state
+
+After restarting coordinator:
+- Coordinator reconnected to shards
+- Transaction completed
+
+Outcome: 2PC blocking failure mode observed - shards blocked until coordinator recovery.
+
+===================================================================
+TEST 3: Transaction ABORT (no crash)
+===================================================================
+Procedure:
+- BEGIN
+- PUT test1 111
+- PUT test2 222
+- ABORT
+- GET test1
+
+Result:
+- ABORTED response from coordinator
+- GET test1 returned "NOT_FOUND"
+
+Outcome: Rollback successful.
+
+===================================================================
+TEST 4: Single-shard optimization
+===================================================================
+Procedure:
+- Transaction with keys on same shard (aa and ab, both on shard3)
+- BEGIN -> PUT aa 999 -> PUT ab 888 -> COMMIT
+
+Result:
+- Coordinator output: "Single shard - skipping 2PC"
+- No PREPARE/COMMIT messages sent
+
+Outcome: Commit without 2PC overhead. Optimization working.
+
+===================================================================
+TEST 5: Cross-shard 2PC commit
+===================================================================
+Procedure:
+- Transaction with keys on different shards (alice on shard2, aa on shard3)
+- BEGIN -> PUT alice 200 -> PUT aa 200 -> COMMIT
+
+Result:
+=== 2PC START: tx_id=4 ===
+Involved shards: shard2 shard3
+[PHASE 1] Sending PREPARE...
+  shard2 -> YES
+  shard3 -> YES
+[PHASE 2] Decision: COMMIT
+[PHASE 3] Sending COMMIT...
+  shard2 -> COMMITTED
+  shard3 -> COMMITTED
+
+Outcome: Both keys updated atomically across 2 shards.
+
+===================================================================
+TEST 6: Shard failure before transaction
+===================================================================
+Procedure:
+- Killed shard2
+- Client: PUT alice 999
+
+Result:
+- Coordinator output: "ERROR|Connection failed"
+- Client output: "ERROR|Connection failed"
+
+Outcome: Error handled gracefully. No crash.
+
+===================================================================
+2PC BLOCKING FAILURE MODE
+===================================================================
+When coordinator crashes after receiving YES votes from all shards 
+but before writing the decision to its WAL, shards remain in 
+"in-doubt" state. They cannot commit (don't know decision) and 
+cannot abort (already promised to commit). They block until 
+coordinator recovers. This is the classic 2PC limitation that 
+more sophisticated protocols (Paxos Commit, 3PC) attempt to fix.
+
+===================================================================
+BENCHMARK RESULTS
+===================================================================
+Single-key PUTs (1000 ops): 
+Throughput: 2-5 ops/sec
+
+Cross-shard 2PC transactions (100 txns):
+Throughput: 5-10 txn/sec
+
+Single-shard transactions (100 txns): 
+Throughput: 10-20 txn/sec
+
+===================================================================

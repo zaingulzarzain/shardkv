@@ -1,0 +1,36 @@
+2PC Test Script - Run these commands in order
+
+=== TEST 1: Single-shard transaction ===
+BEGIN
+PUT test_a 111
+PUT test_b 222
+COMMIT
+Expected: COMMITTED (single shard)
+
+=== TEST 2: Cross-shard 2PC ===
+BEGIN
+PUT alice 999
+PUT aa 888
+COMMIT
+Expected: Full 2PC output with PREPARE -> YES -> COMMIT
+
+=== TEST 3: Abort rollback ===
+BEGIN
+PUT test_x 123
+PUT test_y 456
+ABORT
+GET test_x
+Expected: NOT_FOUND
+
+=== TEST 4: Single-key operations ===
+PUT single1 hello
+GET single1
+Expected: hello
+
+=== TEST 5: Stats check ===
+\stats
+Expected: Shows key distribution
+
+=== TEST 6: Keys check ===
+\keys
+Expected: Shows all keys and their shards
