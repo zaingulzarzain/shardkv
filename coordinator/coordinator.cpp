@@ -4,6 +4,8 @@
 #include <map>
 #include <vector>
 #include <set>
+#include <chrono>
+#include <thread>
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -27,6 +29,9 @@ struct Transaction
 
 map<int, Transaction> active_txns;
 int next_tx_id = 1;
+
+// Set this to true to enable delays for chaos testing
+bool CHAOS_TEST_MODE = true;
 
 
 string send_to_shard(string shard_name, string message)
@@ -73,9 +78,20 @@ bool run_two_phase_commit(Transaction& tx)
 
     for (string shard : tx.involved_shards)
     {
+        // CHAOS TEST DELAY: 5 second pause before each PREPARE
+        if (CHAOS_TEST_MODE)
+        {
+            cout << "  [DELAY 5s] Waiting before sending PREPARE to " << shard << "..." << endl;
+            this_thread::sleep_for(chrono::seconds(5));
+        }
+        
         string response = send_to_shard(shard, "PREPARE " + to_string(tx.tx_id));
         cout << "  " << shard << " -> " << response << endl;
-        if (response != "YES") all_yes = false;
+        
+        if (response != "YES" && response.find("YES") == string::npos)
+        {
+            all_yes = false;
+        }
     }
 
     // PHASE 2: DECISION
@@ -89,6 +105,14 @@ bool run_two_phase_commit(Transaction& tx)
     {
         decision = "ABORT";
         cout << "\n[PHASE 2] Decision: ABORT" << endl;
+    }
+
+    // CHAOS TEST: Delay before sending decision (to test coordinator crash)
+    if (CHAOS_TEST_MODE && decision == "COMMIT")
+    {
+        cout << "\n[CHAOS TEST] 3 second delay before sending COMMIT..." << endl;
+        cout << "  >>> KILL COORDINATOR NOW (Ctrl+C) to test crash recovery <<<" << endl;
+        this_thread::sleep_for(chrono::seconds(3));
     }
 
     // PHASE 3: COMMIT or ABORT
@@ -304,6 +328,15 @@ int main()
 
     cout << "Coordinator running on port 8000" << endl;
     cout << "Ring built: 3 shards, 150 virtual nodes each" << endl;
+    
+    if (CHAOS_TEST_MODE)
+    {
+        cout << "\n*** CHAOS TEST MODE ENABLED ***" << endl;
+        cout << "  - 5s delay before each PREPARE" << endl;
+        cout << "  - 3s delay before sending COMMIT" << endl;
+        cout << "  - Kill shard or coordinator during delays to test crashes" << endl;
+        cout << "********************************\n" << endl;
+    }
 
     while (true)
     {
